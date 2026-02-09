@@ -321,37 +321,89 @@ class SCS(ConicSolver):
         """
         import scs
         scs_version = Version(scs.__version__)
-        args = {"A": data[s.A], "b": data[s.B], "c": data[s.C]}
-        if s.P in data:
-            args["P"] = data[s.P]
-        if warm_start and solver_cache is not None and \
-                self.name() in solver_cache:
-            args["x"] = solver_cache[self.name()]["x"]
-            args["y"] = solver_cache[self.name()]["y"]
-            args["s"] = solver_cache[self.name()]["s"]
-        cones = dims_to_solver_dict(data[ConicSolver.DIMS])
-
-        def solve(_solver_opts):
-            if scs_version.major < 3:
-                _results = scs.solve(args, cones, verbose=verbose, **_solver_opts)
-                _status = self.STATUS_MAP[_results["info"]["statusVal"]]
+        
+        flag = False
+        if "update" in data and "warm_start" in data:
+            flag = True
+            update = data['update']
+            warm_start = data['warm_start']
+        elif "update" in data:
+            raise ValueError("warm_start is not found in data. Please set warm_start to True or False.")
+        elif "warm_start" in data:
+            raise ValueError("update is not found in data. Please set update to True or False.")
+        
+        if flag:
+            # Self-implemented warm start and update
+            if update:
+                assert solver_cache is not None and self.name() in solver_cache, "Solver cache is not found. Update is disabled."
+                solver = solver_cache[self.name()]["solver"] # cached solver
+                # Ref: https://www.cvxgrp.org/scs/api/python.html#python-interface
+                solver.update(b = data[s.B], c = data[s.C])
             else:
-                _results = scs.solve(args, cones, verbose=verbose, **_solver_opts)
-                _status = self.STATUS_MAP[_results["info"]["status_val"]]
-            return _results, _status
+                # Initialize and solve problem
+                args = {"A": data[s.A], "b": data[s.B], "c": data[s.C]}
+                if s.P in data:
+                    args["P"] = data[s.P]
+                cones = dims_to_solver_dict(data[ConicSolver.DIMS])
+                solver_opts = SCS.parse_solver_options(solver_opts)
+                solver = scs.SCS(data = args, cone = cones, verbose = verbose, **solver_opts)
+            
+            if warm_start:
+                assert "warm_start_solution_dict" in data, "warm_start_solution_dict is not found in data."
+                assert len(data["warm_start_solution_dict"]) > 0, "warm_start_solution_dict is empty in data."
+                # Warm start from primal and dual variables
+                results = solver.solve(warm_start = True, 
+                                       **data["warm_start_solution_dict"])
+            else:
+                # Warm start from 0
+                results = solver.solve(warm_start = False)
+                
+            # obtain status
+            if scs_version.major < 3:
+                status = self.STATUS_MAP[results["info"]["statusVal"]]
+            else:
+                status = self.STATUS_MAP[results["info"]["status_val"]]
+            
+            if solver_cache is not None and status == s.OPTIMAL:
+                solver_cache[self.name()] = results
+                # ! Store the solver instance
+                solver_cache[self.name()]["solver"] = solver
+                
+            return results
+        
+        else:
+            # Original CVXPY implementation
+            args = {"A": data[s.A], "b": data[s.B], "c": data[s.C]}
+            if s.P in data:
+                args["P"] = data[s.P]
+            if warm_start and solver_cache is not None and \
+                    self.name() in solver_cache:
+                args["x"] = solver_cache[self.name()]["x"]
+                args["y"] = solver_cache[self.name()]["y"]
+                args["s"] = solver_cache[self.name()]["s"]
+            cones = dims_to_solver_dict(data[ConicSolver.DIMS])
 
-        solver_opts = SCS.parse_solver_options(solver_opts)
-        results, status = solve(solver_opts)
-        if (status in s.INACCURATE and scs_version.major == 2
-                and "acceleration_lookback" not in solver_opts):
-            warn(SCS.ACCELERATION_RETRY_MESSAGE % str(scs_version))
-            retry_opts = solver_opts.copy()
-            retry_opts["acceleration_lookback"] = 0
-            results, status = solve(retry_opts)
+            def solve(_solver_opts):
+                if scs_version.major < 3:
+                    _results = scs.solve(args, cones, verbose=verbose, **_solver_opts)
+                    _status = self.STATUS_MAP[_results["info"]["statusVal"]]
+                else:
+                    _results = scs.solve(args, cones, verbose=verbose, **_solver_opts)
+                    _status = self.STATUS_MAP[_results["info"]["status_val"]]
+                return _results, _status
 
-        if solver_cache is not None and status == s.OPTIMAL:
-            solver_cache[self.name()] = results
-        return results
+            solver_opts = SCS.parse_solver_options(solver_opts)
+            results, status = solve(solver_opts)
+            if (status in s.INACCURATE and scs_version.major == 2
+                    and "acceleration_lookback" not in solver_opts):
+                warn(SCS.ACCELERATION_RETRY_MESSAGE % str(scs_version))
+                retry_opts = solver_opts.copy()
+                retry_opts["acceleration_lookback"] = 0
+                results, status = solve(retry_opts)
+
+            if solver_cache is not None and status == s.OPTIMAL:
+                solver_cache[self.name()] = results
+            return results
     
     def cite(self, data):
         """Returns bibtex citation for the solver.

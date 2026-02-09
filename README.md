@@ -1,5 +1,91 @@
 CVXPY
 =====================
+
+## My Modification
+
+This is my mofification of CVXPY to better control the warm start and update behaviour of the OSQP and scs solver. More solvers may be supported in the future.
+
+In original CVXPY, the warm start and update functions are controlled by the single `warm_start` flag and the same problem instance must be used for repeated solves. This setting lacks flexibility:
+1. When repeatedly solving large number of problems of similar structure, it is memeory-inefficient to store the problem instances for all samples; instead, we would expect to only instantiate smaller amount of problem instances and reuse them for repeated solves (like batch-by-batch im deep learning training). And,
+2. The warm start and update cannot be used separately. And CVXPY does not support warm start from user-defined value but only from the previous solution.
+
+### OSQP
+
+The original CVXPY supports warm start from the previous solve and update, both from the internal cached data. I modify [osqp_qpif](cvxpy/reductions/solvers/qp_solvers/osqp_qpif.py). It supports lower-level control by passing extra data to the solver. An example is stored in `test_osqp.py`.
+
+The table below summarizes the new options for controlling OSQP warm start and update behaviour in this modified CVXPY:
+
+| Option Name | Where to Set (in `data` dict) | Example Value / Usage |
+|-------------|---------------------------------|---------|
+| update    | `data['update']`                | `True` or `False` |
+| warm start | `data['warm_start']`            | `True` or `False` |
+| warm start values | `data['warm_start_solution_dict']`  | `{'x': ndarray, 'y': ndarray}` |
+
+### SCS
+
+The original CVXPY only supports warm start from the previous solve, by the internal cached data and no update is supported. I modify [scs_conif](cvxpy/reductions/solvers/conic_solvers/scs_conif.py).
+
+The table below summarizes the new options for controlling SCS warm start and update behaviour in this modified CVXPY:
+| Option Name | Where to Set (in `data` dict) | Example Value / Usage |
+|-------------|---------------------------------|---------|
+| update    | `data['update']`                | `True` or `False` |
+| warm start | `data['warm_start']`            | `True` or `False` |
+| warm start values | `data['warm_start_solution_dict']`  | `{'x': ndarray, 'y': ndarray, 's': ndarray}` |
+
+
+> NOTE: when using this feature, you need to simultaneously include `update` and `warm_start` in the `data` dict.
+
+You may refer to the following minimal example usage (see `text_osqp.py` for more detail):
+
+As the solver's warm start requires initialization for the canornical (standard) form, the warm start function is implemented at low-level of CVXPY inference through compiling `get_problem_data` and the low-level solve `solve_via_data` function.
+
+```python
+# prob is the predefined problem instance
+
+# Compile
+data, chain, inverse_data = prob.get_problem_data(solver = cp.OSQP)
+
+# Set new options
+data['update'] = True
+data['warm_start'] = True
+data['warm_start_solution_dict'] = {'x': previous_x, 'y': previous_y}
+
+results = chain.solve_via_data(problem=prob, data=data, warm_start=False/True, verbose=False, solver_opts={'polish': False})
+```
+
+> NOTE: The original `warm_start` flag is ignored.
+
+See `test_new.py` for concrete usage patterns.
+
+## How to install
+
+```bash
+pip install git+https://github.com/xuwkk/cvxpy.git
+```
+or
+```bash
+pip install git+https://github.com/xuwkk/cvxpy.git@v1.9.0-lapso.1
+```
+
+For development, clone and isntall in development mode:
+```bash
+git clone https://github.com/xuwkk/cvxpy.git
+pip install -e .
+```
+
+After installation, use CVXPY as usual:
+```python
+import cvxpy as cp
+```
+
+> NOTE: You should uninstall the original CVXPY installation before installing this modified version.
+
+Below is the original README.md from the CVXPY repository.
+
+
+------------------------------------------------------------------------------------------------
+
+
 [![Build Status](https://github.com/cvxpy/cvxpy/actions/workflows/build.yml/badge.svg?event=push)](https://github.com/cvxpy/cvxpy/actions/workflows/build.yml)
 ![PyPI - downloads](https://img.shields.io/pypi/dm/cvxpy.svg?label=Pypi%20downloads)
 ![Conda - downloads](https://img.shields.io/conda/dn/conda-forge/cvxpy.svg?label=Conda%20downloads)

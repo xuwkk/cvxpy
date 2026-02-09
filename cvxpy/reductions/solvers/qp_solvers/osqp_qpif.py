@@ -104,45 +104,106 @@ class OSQP(QpSolver):
         solver_opts['eps_abs'] = solver_opts.get('eps_abs', 1e-5)
         solver_opts['eps_rel'] = solver_opts.get('eps_rel', 1e-5)
         solver_opts['max_iter'] = solver_opts.get('max_iter', 10000)
+        
+        flag = False
+        if "update" in data and "warm_start" in data:
+            flag = True  # Use a flag to enter the self-implemented function; otherwise, use the original CVXPY function.
+            update = data['update']
+            warm_start = data['warm_start']
+        elif "update" in data:
+            raise ValueError("warm_start is not found in data. Please set warm_start to True or False.")
+        elif "warm_start" in data:
+            raise ValueError("update is not found in data. Please set update to True or False.")
+        
+        if flag:
+            # Self-implemented warm start and update
+            factorizing = True
+            # Use the stored solver instance to update the problem data
+            if update:
+                assert solver_cache is not None and self.name() in solver_cache, "Solver cache is not found. Update is disabled."
+                solver, old_data, results = solver_cache[self.name()]
+                new_args = {}
+                for key in ['q', 'l', 'u']:
+                    if any(data[key] != old_data[key]):
+                        new_args[key] = data[key]
+                factorizing = False
+                if P.data.shape != old_data[s.P].data.shape or any(
+                        P.data != old_data[s.P].data):
+                    P_triu = sp.csc_array(sp.triu(P, format='csc'))
+                    new_args['Px'] = P_triu.data
+                    factorizing = True
+                if A.data.shape != old_data['Ax'].data.shape or any(
+                        A.data != old_data['Ax'].data):
+                    new_args['Ax'] = A.data
+                    factorizing = True
 
-        # Use cached data
-        if warm_start and solver_cache is not None and self.name() in solver_cache:
-            solver, old_data, results = solver_cache[self.name()]
-            new_args = {}
-            for key in ['q', 'l', 'u']:
-                if any(data[key] != old_data[key]):
-                    new_args[key] = data[key]
-            factorizing = False
-            if P.data.shape != old_data[s.P].data.shape or any(
-                    P.data != old_data[s.P].data):
-                P_triu = sp.csc_array(sp.triu(P, format='csc'))
-                new_args['Px'] = P_triu.data
-                factorizing = True
-            if A.data.shape != old_data['Ax'].data.shape or any(
-                    A.data != old_data['Ax'].data):
-                new_args['Ax'] = A.data
-                factorizing = True
-
-            if new_args:
-                solver.update(**new_args)
-            # Map OSQP statuses back to CVXPY statuses
-            status_map = self.STATUS_MAP_PRE_V1 if is_pre_v1 else self.STATUS_MAP
-            status = status_map.get(results.info.status_val, s.SOLVER_ERROR)
-            if status == s.OPTIMAL:
-                solver.warm_start(results.x, results.y)
-            # Polish if factorizing.
+                if new_args:
+                    solver.update(**new_args)
+            else:
+                # Initialize and solve problem
+                polish_param = 'polish' if is_pre_v1 else 'polishing'
+                solver_opts[polish_param] = solver_opts.get(polish_param, True)
+                solver = osqp.OSQP()
+                try:
+                    solver.setup(P, q, A, lA, uA, verbose=verbose, **solver_opts)
+                except Exception as e:
+                    raise SolverError(e)
+        
+            if warm_start:
+                assert "warm_start_solution_dict" in data, "warm_start_solution_dict is not found in data."
+                assert len(data["warm_start_solution_dict"]) > 0, "warm_start_solution_dict is empty in data."
+                # Warm start from primal and dual variables
+                solver.warm_start(data["warm_start_solution_dict"]["x"], data["warm_start_solution_dict"]["y"])
+            else:
+                # Warm start from 0
+                solver.warm_start(np.zeros(P.shape[0]), np.zeros(A.shape[0]))
+            
             polish_param = 'polish' if is_pre_v1 else 'polishing'
             solver_opts[polish_param] = solver_opts.get(polish_param, factorizing)
             solver.update_settings(verbose=verbose, **solver_opts)
+            
         else:
-            # Initialize and solve problem
-            polish_param = 'polish' if is_pre_v1 else 'polishing'
-            solver_opts[polish_param] = solver_opts.get(polish_param, True)
-            solver = osqp.OSQP()
-            try:
-                solver.setup(P, q, A, lA, uA, verbose=verbose, **solver_opts)
-            except Exception as e:
-                raise SolverError(e)
+            # Default warm start and update
+            # Use cached data
+            if warm_start and solver_cache is not None and self.name() in solver_cache:
+                solver, old_data, results = solver_cache[self.name()]
+                new_args = {}
+                for key in ['q', 'l', 'u']:
+                    if any(data[key] != old_data[key]):
+                        new_args[key] = data[key]
+                factorizing = False
+                if P.data.shape != old_data[s.P].data.shape or any(
+                        P.data != old_data[s.P].data):
+                    P_triu = sp.csc_array(sp.triu(P, format='csc'))
+                    new_args['Px'] = P_triu.data
+                    factorizing = True
+                if A.data.shape != old_data['Ax'].data.shape or any(
+                        A.data != old_data['Ax'].data):
+                    new_args['Ax'] = A.data
+                    factorizing = True
+
+                if new_args:
+                    solver.update(**new_args)
+                # Map OSQP statuses back to CVXPY statuses
+                status_map = self.STATUS_MAP_PRE_V1 if is_pre_v1 else self.STATUS_MAP
+                status = status_map.get(results.info.status_val, s.SOLVER_ERROR)
+                
+                if status == s.OPTIMAL:
+                    # Warm-start from the previous solution
+                    solver.warm_start(results.x, results.y)
+                # Polish if factorizing.
+                polish_param = 'polish' if is_pre_v1 else 'polishing'
+                solver_opts[polish_param] = solver_opts.get(polish_param, factorizing)
+                solver.update_settings(verbose=verbose, **solver_opts)
+            else:
+                # Initialize and solve problem
+                polish_param = 'polish' if is_pre_v1 else 'polishing'
+                solver_opts[polish_param] = solver_opts.get(polish_param, True)
+                solver = osqp.OSQP()
+                try:
+                    solver.setup(P, q, A, lA, uA, verbose=verbose, **solver_opts)
+                except Exception as e:
+                    raise SolverError(e)
 
         results = solver.solve(raise_error=False)
 
