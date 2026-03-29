@@ -85,6 +85,7 @@ class OSQP(QpSolver):
                        solver_cache=None):
         import osqp
         is_pre_v1 = float(osqp.__version__.split('.')[0]) < 1
+        solver_opts = solver_opts.copy()
         
         P = data[s.P]
         q = data[s.Q]
@@ -110,6 +111,10 @@ class OSQP(QpSolver):
             flag = True  # Use a flag to enter the self-implemented function; otherwise, use the original CVXPY function.
             update = data['update']
             warm_start = data['warm_start']
+            if not isinstance(update, (bool, np.bool_)):
+                raise TypeError("data['update'] must be a bool.")
+            if not isinstance(warm_start, (bool, np.bool_)):
+                raise TypeError("data['warm_start'] must be a bool.")
         elif "update" in data:
             raise ValueError("warm_start is not found in data. Please set warm_start to True or False.")
         elif "warm_start" in data:
@@ -120,7 +125,10 @@ class OSQP(QpSolver):
             factorizing = True
             # Use the stored solver instance to update the problem data
             if update:
-                assert solver_cache is not None and self.name() in solver_cache, "Solver cache is not found. Update is disabled."
+                if solver_cache is None or self.name() not in solver_cache:
+                    raise ValueError(
+                        "Solver cache is not found. Solve once before using data['update']=True."
+                    )
                 solver, old_data, results = solver_cache[self.name()]
                 new_args = {}
                 for key in ['q', 'l', 'u']:
@@ -150,10 +158,35 @@ class OSQP(QpSolver):
                     raise SolverError(e)
         
             if warm_start:
-                assert "warm_start_solution_dict" in data, "warm_start_solution_dict is not found in data."
-                assert len(data["warm_start_solution_dict"]) > 0, "warm_start_solution_dict is empty in data."
+                ws_dict = data.get("warm_start_solution_dict")
+                if not isinstance(ws_dict, dict) or len(ws_dict) == 0:
+                    raise ValueError(
+                        "data['warm_start_solution_dict'] must be a non-empty dict when "
+                        "data['warm_start']=True."
+                    )
+                missing = {"x", "y"} - set(ws_dict.keys())
+                if missing:
+                    raise ValueError(
+                        "data['warm_start_solution_dict'] is missing required keys: "
+                        f"{sorted(missing)}."
+                    )
+
+                x_ws = np.asarray(ws_dict["x"]).reshape(-1)
+                y_ws = np.asarray(ws_dict["y"]).reshape(-1)
+                if x_ws.size != P.shape[0]:
+                    raise ValueError(
+                        "Invalid warm-start shape for 'x': expected length "
+                        f"{P.shape[0]}, got {x_ws.size}."
+                    )
+                if y_ws.size != A.shape[0]:
+                    raise ValueError(
+                        "Invalid warm-start shape for 'y': expected length "
+                        f"{A.shape[0]}, got {y_ws.size}."
+                    )
+                if not np.all(np.isfinite(x_ws)) or not np.all(np.isfinite(y_ws)):
+                    raise ValueError("Warm-start values for 'x' and 'y' must be finite.")
                 # Warm start from primal and dual variables
-                solver.warm_start(data["warm_start_solution_dict"]["x"], data["warm_start_solution_dict"]["y"])
+                solver.warm_start(x_ws, y_ws)
             else:
                 # Warm start from 0
                 solver.warm_start(np.zeros(P.shape[0]), np.zeros(A.shape[0]))

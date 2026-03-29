@@ -557,6 +557,73 @@ class TestQp(QPTestBase):
         result2 = prob.solve(solver="OSQP", warm_start=False)
         self.assertAlmostEqual(result, result2)
 
+    def test_osqp_custom_data_update_and_warm_start(self) -> None:
+        """Test custom OSQP update/warm-start controls via solve_via_data."""
+        if cp.OSQP not in INSTALLED_SOLVERS:
+            self.skipTest("OSQP is not installed.")
+
+        n = 8
+        m = 12
+        np.random.seed(0)
+        A = np.random.randn(m, n)
+        b = cp.Parameter(m, name="b")
+        x = cp.Variable(n)
+        prob = cp.Problem(cp.Minimize(cp.sum_squares(A @ x - b)))
+
+        b.value = np.random.randn(m)
+        data, chain, _ = prob.get_problem_data(solver=cp.OSQP)
+        data["update"] = False
+        data["warm_start"] = False
+        first = chain.solve_via_data(
+            problem=prob,
+            data=data,
+            warm_start=False,
+            verbose=False,
+            solver_opts={"polishing": False},
+        )
+
+        b.value = np.random.randn(m)
+        data2, _, _ = prob.get_problem_data(solver=cp.OSQP)
+        data2["update"] = True
+        data2["warm_start"] = True
+        data2["warm_start_solution_dict"] = {"x": first.x, "y": first.y}
+        second = chain.solve_via_data(
+            problem=prob,
+            data=data2,
+            warm_start=False,
+            verbose=False,
+            solver_opts={"polishing": False},
+        )
+        self.assertIn(second.info.status_val, [1, 2])
+
+    def test_osqp_custom_data_validation(self) -> None:
+        """Test validation errors for custom OSQP controls."""
+        if cp.OSQP not in INSTALLED_SOLVERS:
+            self.skipTest("OSQP is not installed.")
+
+        n = 5
+        m = 8
+        np.random.seed(1)
+        A = np.random.randn(m, n)
+        b = cp.Parameter(m, name="b")
+        x = cp.Variable(n)
+        prob = cp.Problem(cp.Minimize(cp.sum_squares(A @ x - b)))
+
+        b.value = np.random.randn(m)
+        data, chain, _ = prob.get_problem_data(solver=cp.OSQP)
+        data["update"] = False
+        data["warm_start"] = True
+        data["warm_start_solution_dict"] = {"x": np.zeros(n + 1), "y": np.zeros(m)}
+
+        with self.assertRaises(ValueError):
+            chain.solve_via_data(
+                problem=prob,
+                data=data,
+                warm_start=False,
+                verbose=False,
+                solver_opts={"polishing": False},
+            )
+
     def test_qpalm_warmstart(self) -> None:
         """Test warm start.
         """
@@ -579,6 +646,197 @@ class TestQp(QPTestBase):
             result = prob.solve(solver=cp.QPALM, warm_start=True)
             result2 = prob.solve(solver=cp.QPALM, warm_start=False)
             self.assertAlmostEqual(result, result2)
+
+    def test_qpalm_custom_data_update_and_warm_start(self) -> None:
+        """Test custom QPALM update/warm-start controls via solve_via_data."""
+        if cp.QPALM not in INSTALLED_SOLVERS:
+            self.skipTest("QPALM is not installed.")
+
+        n = 8
+        m = 12
+        np.random.seed(21)
+        A = np.random.randn(m, n)
+        b = cp.Parameter(m, name="b")
+        x = cp.Variable(n)
+        prob = cp.Problem(cp.Minimize(cp.sum_squares(A @ x - b)))
+
+        b.value = np.random.randn(m)
+        data, chain, _ = prob.get_problem_data(solver=cp.QPALM)
+        data["update"] = False
+        data["warm_start"] = False
+        first = chain.solve_via_data(
+            problem=prob,
+            data=data,
+            warm_start=False,
+            verbose=False,
+            solver_opts={},
+        )
+
+        b.value = np.random.randn(m)
+        data2, _, _ = prob.get_problem_data(solver=cp.QPALM)
+        data2["update"] = True
+        data2["warm_start"] = True
+        data2["warm_start_solution_dict"] = {
+            "x": first.solution.x.copy(),
+            "y": first.solution.y.copy(),
+        }
+        second = chain.solve_via_data(
+            problem=prob,
+            data=data2,
+            warm_start=False,
+            verbose=False,
+            solver_opts={},
+        )
+        self.assertEqual(second.info.status_val, 1)
+
+    def test_qpalm_custom_data_validation(self) -> None:
+        """Test validation errors for custom QPALM controls."""
+        if cp.QPALM not in INSTALLED_SOLVERS:
+            self.skipTest("QPALM is not installed.")
+
+        n = 6
+        m = 9
+        np.random.seed(22)
+        A = np.random.randn(m, n)
+        b = cp.Parameter(m, name="b")
+        x = cp.Variable(n)
+        prob = cp.Problem(cp.Minimize(cp.sum_squares(A @ x - b)))
+
+        b.value = np.random.randn(m)
+        data, chain, _ = prob.get_problem_data(solver=cp.QPALM)
+        data["update"] = True
+        with self.assertRaises(ValueError):
+            chain.solve_via_data(
+                problem=prob,
+                data=data,
+                warm_start=False,
+                verbose=False,
+                solver_opts={},
+            )
+
+        data2, _, _ = prob.get_problem_data(solver=cp.QPALM)
+        data2["update"] = False
+        data2["warm_start"] = True
+        data2["warm_start_solution_dict"] = {
+            "x": np.zeros(n + 1),
+            "y": np.zeros(m),
+        }
+        with self.assertRaises(ValueError):
+            chain.solve_via_data(
+                problem=prob,
+                data=data2,
+                warm_start=False,
+                verbose=False,
+                solver_opts={},
+            )
+
+    def test_proxqp_warmstart(self) -> None:
+        """Test PROXQP warm start."""
+        if cp.PROXQP not in INSTALLED_SOLVERS:
+            self.skipTest("PROXQP is not installed.")
+
+        m = 200
+        n = 100
+        np.random.seed(23)
+        A = np.random.randn(m, n)
+        b = Parameter(m)
+
+        x = Variable(n)
+        prob = Problem(Minimize(sum_squares(A @ x - b)))
+
+        b.value = np.random.randn(m)
+        result = prob.solve(solver=cp.PROXQP, warm_start=False, backend="sparse")
+        result2 = prob.solve(solver=cp.PROXQP, warm_start=True, backend="sparse")
+        self.assertAlmostEqual(result, result2)
+        b.value = np.random.randn(m)
+        result = prob.solve(solver=cp.PROXQP, warm_start=True, backend="sparse")
+        result2 = prob.solve(solver=cp.PROXQP, warm_start=False, backend="sparse")
+        self.assertAlmostEqual(result, result2)
+
+    def test_proxqp_custom_data_update_and_warm_start(self) -> None:
+        """Test custom PROXQP update/warm-start controls via solve_via_data."""
+        if cp.PROXQP not in INSTALLED_SOLVERS:
+            self.skipTest("PROXQP is not installed.")
+
+        n = 8
+        m = 12
+        np.random.seed(24)
+        A = np.random.randn(m, n)
+        b = cp.Parameter(m, name="b")
+        x = cp.Variable(n)
+        prob = cp.Problem(cp.Minimize(cp.sum_squares(A @ x - b)))
+
+        b.value = np.random.randn(m)
+        data, chain, _ = prob.get_problem_data(solver=cp.PROXQP)
+        data["update"] = False
+        data["warm_start"] = False
+        first = chain.solve_via_data(
+            problem=prob,
+            data=data,
+            warm_start=False,
+            verbose=False,
+            solver_opts={"backend": "sparse"},
+        )
+
+        b.value = np.random.randn(m)
+        data2, _, _ = prob.get_problem_data(solver=cp.PROXQP)
+        data2["update"] = True
+        data2["warm_start"] = True
+        data2["warm_start_solution_dict"] = {
+            "x": first.x.copy(),
+            "y": first.y.copy(),
+            "z": first.z.copy(),
+        }
+        second = chain.solve_via_data(
+            problem=prob,
+            data=data2,
+            warm_start=False,
+            verbose=False,
+            solver_opts={"backend": "sparse"},
+        )
+        self.assertEqual(second.info.status.name, "PROXQP_SOLVED")
+
+    def test_proxqp_custom_data_validation(self) -> None:
+        """Test validation errors for custom PROXQP controls."""
+        if cp.PROXQP not in INSTALLED_SOLVERS:
+            self.skipTest("PROXQP is not installed.")
+
+        n = 6
+        m = 9
+        np.random.seed(25)
+        A = np.random.randn(m, n)
+        b = cp.Parameter(m, name="b")
+        x = cp.Variable(n)
+        prob = cp.Problem(cp.Minimize(cp.sum_squares(A @ x - b)))
+
+        b.value = np.random.randn(m)
+        data, chain, _ = prob.get_problem_data(solver=cp.PROXQP)
+        data["update"] = True
+        with self.assertRaises(ValueError):
+            chain.solve_via_data(
+                problem=prob,
+                data=data,
+                warm_start=False,
+                verbose=False,
+                solver_opts={"backend": "sparse"},
+            )
+
+        data2, _, _ = prob.get_problem_data(solver=cp.PROXQP)
+        data2["update"] = False
+        data2["warm_start"] = True
+        data2["warm_start_solution_dict"] = {
+            "x": np.zeros(n + 1),
+            "y": np.zeros(m),
+            "z": np.zeros(m),
+        }
+        with self.assertRaises(ValueError):
+            chain.solve_via_data(
+                problem=prob,
+                data=data2,
+                warm_start=False,
+                verbose=False,
+                solver_opts={"backend": "sparse"},
+            )
 
     def test_gurobi_warmstart(self) -> None:
         """Test Gurobi warm start with a user provided point.

@@ -321,12 +321,17 @@ class SCS(ConicSolver):
         """
         import scs
         scs_version = Version(scs.__version__)
+        solver_opts = solver_opts.copy()
         
         flag = False
         if "update" in data and "warm_start" in data:
             flag = True
             update = data['update']
             warm_start = data['warm_start']
+            if not isinstance(update, (bool, np.bool_)):
+                raise TypeError("data['update'] must be a bool.")
+            if not isinstance(warm_start, (bool, np.bool_)):
+                raise TypeError("data['warm_start'] must be a bool.")
         elif "update" in data:
             raise ValueError("warm_start is not found in data. Please set warm_start to True or False.")
         elif "warm_start" in data:
@@ -334,9 +339,55 @@ class SCS(ConicSolver):
         
         if flag:
             # Self-implemented warm start and update
+            if warm_start:
+                ws_dict = data.get("warm_start_solution_dict")
+                if not isinstance(ws_dict, dict) or len(ws_dict) == 0:
+                    raise ValueError(
+                        "data['warm_start_solution_dict'] must be a non-empty dict when "
+                        "data['warm_start']=True."
+                    )
+                allowed_keys = {"x", "y", "s"}
+                unknown_keys = set(ws_dict.keys()) - allowed_keys
+                if unknown_keys:
+                    raise ValueError(
+                        "data['warm_start_solution_dict'] contains unsupported keys: "
+                        f"{sorted(unknown_keys)}. Allowed keys are {sorted(allowed_keys)}."
+                    )
+
+                validated_ws_dict = {}
+                n_x = data[s.C].shape[0]
+                n_y_s = data[s.B].shape[0]
+                for key, expected_size in (("x", n_x), ("y", n_y_s), ("s", n_y_s)):
+                    if key in ws_dict:
+                        ws_val = np.asarray(ws_dict[key]).reshape(-1)
+                        if ws_val.size != expected_size:
+                            raise ValueError(
+                                f"Invalid warm-start shape for '{key}': expected length "
+                                f"{expected_size}, got {ws_val.size}."
+                            )
+                        if not np.all(np.isfinite(ws_val)):
+                            raise ValueError(f"Warm-start values for '{key}' must be finite.")
+                        validated_ws_dict[key] = ws_val
+            else:
+                validated_ws_dict = None
+
+            def solve_custom(_solver):
+                """Run SCS solve with validated warm-start payload."""
+                if warm_start:
+                    return _solver.solve(warm_start=True, **validated_ws_dict)
+                return _solver.solve(warm_start=False)
+
             if update:
-                assert solver_cache is not None and self.name() in solver_cache, "Solver cache is not found. Update is disabled."
-                solver = solver_cache[self.name()]["solver"] # cached solver
+                if solver_cache is None or self.name() not in solver_cache:
+                    raise ValueError(
+                        "Solver cache is not found. Solve once before using data['update']=True."
+                    )
+                if "solver" not in solver_cache[self.name()]:
+                    raise ValueError(
+                        "Cached SCS solver instance not found. Run at least one solve with "
+                        "data['update']=False in custom mode before setting data['update']=True."
+                    )
+                solver = solver_cache[self.name()]["solver"]
                 # Ref: https://www.cvxgrp.org/scs/api/python.html#python-interface
                 solver.update(b = data[s.B], c = data[s.C])
             else:
@@ -345,24 +396,29 @@ class SCS(ConicSolver):
                 if s.P in data:
                     args["P"] = data[s.P]
                 cones = dims_to_solver_dict(data[ConicSolver.DIMS])
-                solver_opts = SCS.parse_solver_options(solver_opts)
-                solver = scs.SCS(data = args, cone = cones, verbose = verbose, **solver_opts)
-            
-            if warm_start:
-                assert "warm_start_solution_dict" in data, "warm_start_solution_dict is not found in data."
-                assert len(data["warm_start_solution_dict"]) > 0, "warm_start_solution_dict is empty in data."
-                # Warm start from primal and dual variables
-                results = solver.solve(warm_start = True, 
-                                       **data["warm_start_solution_dict"])
-            else:
-                # Warm start from 0
-                results = solver.solve(warm_start = False)
+                parsed_solver_opts = SCS.parse_solver_options(solver_opts.copy())
+                solver = scs.SCS(data=args, cone=cones, verbose=verbose, **parsed_solver_opts)
+            results = solve_custom(solver)
                 
             # obtain status
             if scs_version.major < 3:
                 status = self.STATUS_MAP[results["info"]["statusVal"]]
             else:
                 status = self.STATUS_MAP[results["info"]["status_val"]]
+
+            # Keep the SCS v2 retry behavior for custom mode when feasible.
+            # Retry is only possible when not using solver.update(...) path.
+            if (not update and status in s.INACCURATE and scs_version.major == 2
+                    and "acceleration_lookback" not in solver_opts):
+                warn(SCS.ACCELERATION_RETRY_MESSAGE % str(scs_version))
+                retry_opts = SCS.parse_solver_options(solver_opts.copy())
+                retry_opts["acceleration_lookback"] = 0
+                solver = scs.SCS(data=args, cone=cones, verbose=verbose, **retry_opts)
+                results = solve_custom(solver)
+                if scs_version.major < 3:
+                    status = self.STATUS_MAP[results["info"]["statusVal"]]
+                else:
+                    status = self.STATUS_MAP[results["info"]["status_val"]]
             
             if solver_cache is not None and status == s.OPTIMAL:
                 solver_cache[self.name()] = results

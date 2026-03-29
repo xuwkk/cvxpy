@@ -3,17 +3,17 @@ CVXPY
 
 ## My Modification
 
-This is my mofification of CVXPY to better control the warm start and update behaviour of the OSQP and scs solver. More solvers may be supported in the future.
+This fork extends CVXPY to provide explicit control of warm start and update behavior for OSQP, SCS, QPALM, and PROXQP. More solvers may be supported in the future.
 
-In original CVXPY, the warm start and update functions are controlled by the single `warm_start` flag and the same problem instance must be used for repeated solves. This setting lacks flexibility:
-1. When repeatedly solving large number of problems of similar structure, it is memeory-inefficient to store the problem instances for all samples; instead, we would expect to only instantiate smaller amount of problem instances and reuse them for repeated solves (like batch-by-batch im deep learning training). And,
-2. The warm start and update cannot be used separately. And CVXPY does not support warm start from user-defined value but only from the previous solution.
+In original CVXPY, warm start and update behavior is mostly tied to a single `warm_start` flag and internal cache behavior. This is limiting when:
+1. Solving many problems with similar structure, where reusing a small pool of `Problem` instances is preferred over storing every instance.
+2. Needing to control update and warm start independently, or warm-start from user-provided values (not only from the previous solve).
 
 ### OSQP
 
-The original CVXPY supports warm start from the previous solve and update, both from the internal cached data. I modify [osqp_qpif](cvxpy/reductions/solvers/qp_solvers/osqp_qpif.py). It supports lower-level control by passing extra data to the solver. An example is stored in `test_osqp.py`.
+The original CVXPY supports warm start from the previous solve and update, both from the internal cached data. I modify [osqp_qpif](cvxpy/reductions/solvers/qp_solvers/osqp_qpif.py). It supports lower-level control by passing extra data to the solver. An example is stored in `test_new.py`.
 
-The table below summarizes the new options for controlling OSQP warm start and update behaviour in this modified CVXPY:
+The table below summarizes the new options for controlling OSQP warm start and update behavior:
 
 | Option Name | Where to Set (in `data` dict) | Example Value / Usage |
 |-------------|---------------------------------|---------|
@@ -21,23 +21,71 @@ The table below summarizes the new options for controlling OSQP warm start and u
 | warm start | `data['warm_start']`            | `True` or `False` |
 | warm start values | `data['warm_start_solution_dict']`  | `{'x': ndarray, 'y': ndarray}` |
 
+OSQP update semantics in this implementation:
+- If `update=True`, a cached solver instance must already exist from a previous solve on the same `Problem` object.
+- `update=True` updates solver data (`q/l/u`, and `P/A` values when changed) without rebuilding from scratch.
+- If `warm_start=True`, `warm_start_solution_dict` must contain both `x` and `y` with valid lengths.
+- If `warm_start=False`, the solver is explicitly warm-started from zeros.
+
 ### SCS
 
 The original CVXPY only supports warm start from the previous solve, by the internal cached data and no update is supported. I modify [scs_conif](cvxpy/reductions/solvers/conic_solvers/scs_conif.py).
 
-The table below summarizes the new options for controlling SCS warm start and update behaviour in this modified CVXPY:
+The table below summarizes the new options for controlling SCS warm start and update behavior:
 | Option Name | Where to Set (in `data` dict) | Example Value / Usage |
 |-------------|---------------------------------|---------|
 | update    | `data['update']`                | `True` or `False` |
 | warm start | `data['warm_start']`            | `True` or `False` |
 | warm start values | `data['warm_start_solution_dict']`  | `{'x': ndarray, 'y': ndarray, 's': ndarray}` |
 
+SCS update semantics in this implementation:
+- If `update=True`, a cached solver instance must already exist from a previous solve on the same `Problem` object.
+- Current update path calls `solver.update(b=..., c=...)` (it does not update `A`/`P` structure).
+- If `warm_start=True`, `warm_start_solution_dict` accepts keys in `{x, y, s}` with valid lengths.
+- If `warm_start=False`, the solver runs without user-provided warm-start vectors.
+- For SCS v2, the custom mode keeps the `acceleration_lookback=0` retry behavior when `update=False` and no explicit `acceleration_lookback` is provided.
 
-> NOTE: when using this feature, you need to simultaneously include `update` and `warm_start` in the `data` dict.
+### QPALM
 
-You may refer to the following minimal example usage (see `text_osqp.py` for more detail):
+The original CVXPY supports warm start from cached solver state for QPALM. I modify [qpalm_qpif](cvxpy/reductions/solvers/qp_solvers/qpalm_qpif.py) to expose separate custom controls for update and warm start.
 
-As the solver's warm start requires initialization for the canornical (standard) form, the warm start function is implemented at low-level of CVXPY inference through compiling `get_problem_data` and the low-level solve `solve_via_data` function.
+The table below summarizes the new options for controlling QPALM warm start and update behavior:
+| Option Name | Where to Set (in `data` dict) | Example Value / Usage |
+|-------------|---------------------------------|---------|
+| update    | `data['update']`                | `True` or `False` |
+| warm start | `data['warm_start']`            | `True` or `False` |
+| warm start values | `data['warm_start_solution_dict']`  | `{'x': ndarray, 'y': ndarray}` |
+
+QPALM update semantics in this implementation:
+- If `update=True`, a cached solver instance must already exist from a previous solve on the same `Problem` object.
+- `update=True` updates QPALM problem data (`Q/A`, `q`, and bounds) without rebuilding the solver object when possible.
+- If `warm_start=True`, `warm_start_solution_dict` must contain both `x` and `y` with valid lengths.
+- If `warm_start=False`, the solver is explicitly warm-started from zeros.
+
+### PROXQP
+
+The original CVXPY supports warm start from cached solver state for PROXQP. I modify [proxqp_qpif](cvxpy/reductions/solvers/qp_solvers/proxqp_qpif.py) to expose separate custom controls for update and warm start.
+
+The table below summarizes the new options for controlling PROXQP warm start and update behavior:
+| Option Name | Where to Set (in `data` dict) | Example Value / Usage |
+|-------------|---------------------------------|---------|
+| update    | `data['update']`                | `True` or `False` |
+| warm start | `data['warm_start']`            | `True` or `False` |
+| warm start values | `data['warm_start_solution_dict']`  | `{'x': ndarray, 'y': ndarray, 'z': ndarray}` |
+
+PROXQP update semantics in this implementation:
+- If `update=True`, a cached solver instance must already exist from a previous solve on the same `Problem` object.
+- `update=True` updates solver data (`q`, `b`, bounds, and `P/A/F` when changed) without rebuilding the solver object when possible.
+- If `warm_start=True`, `warm_start_solution_dict` must contain `x`, `y`, and `z` with valid lengths.
+- If `warm_start=False`, the solver is explicitly warm-started from zeros.
+
+
+> NOTE: In this custom mode, include both `update` and `warm_start` in the `data` dict.
+> NOTE: `data['warm_start']` controls warm start behavior. The `warm_start` argument passed to `chain.solve_via_data(...)` is ignored.
+
+You may refer to the following minimal example usage (see `test_new.py` for more detail):
+
+Because solver warm start operates on canonical (standard-form) data, this feature is implemented at the low level through `get_problem_data` and `solve_via_data`.
 
 ```python
 # prob is the predefined problem instance
@@ -50,12 +98,17 @@ data['update'] = True
 data['warm_start'] = True
 data['warm_start_solution_dict'] = {'x': previous_x, 'y': previous_y}
 
-results = chain.solve_via_data(problem=prob, data=data, warm_start=False/True, verbose=False, solver_opts={'polish': False})
+results = chain.solve_via_data(problem=prob, data=data, warm_start=False/True, verbose=False, solver_opts={'polishing': False})
 ```
 
 > NOTE: The original `warm_start` flag is ignored.
 
 See `test_new.py` for concrete usage patterns.
+
+Test files updated in this fork:
+- `test_new.py` demonstrates end-to-end low-level usage for OSQP, SCS, QPALM, and PROXQP.
+- `cvxpy/tests/test_qp_solvers.py` includes OSQP, QPALM, and PROXQP custom-path regression tests.
+- `cvxpy/tests/test_conic_solvers.py` includes SCS custom-path regression tests.
 
 ## How to install
 
@@ -67,7 +120,7 @@ or
 pip install git+https://github.com/xuwkk/cvxpy.git@v1.9.0-lapso.1
 ```
 
-For development, clone and isntall in development mode:
+For development, clone and install in development mode:
 ```bash
 git clone https://github.com/xuwkk/cvxpy.git
 pip install -e .

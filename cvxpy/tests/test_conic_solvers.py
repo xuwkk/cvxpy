@@ -303,6 +303,79 @@ class TestSCS(BaseTest):
         self.assertAlmostEqual(result2, result, places=2)
         print(time > time2)
 
+    def test_scs_custom_data_update_and_warm_start(self) -> None:
+        """Test custom SCS update/warm-start controls via solve_via_data."""
+        if cp.SCS not in INSTALLED_SOLVERS:
+            self.skipTest("SCS is not installed.")
+
+        n = 8
+        m = 16
+        np.random.seed(2)
+        A = np.random.randn(m, n)
+        b = cp.Parameter(m, name="b")
+        x = cp.Variable(n)
+        prob = cp.Problem(cp.Minimize(cp.norm1(x)), [A @ x <= b])
+
+        b.value = np.random.randn(m)
+        data, chain, _ = prob.get_problem_data(solver=cp.SCS)
+        data["update"] = False
+        data["warm_start"] = False
+        first = chain.solve_via_data(
+            problem=prob,
+            data=data,
+            warm_start=False,
+            verbose=False,
+            solver_opts={},
+        )
+
+        b.value = b.value + 0.1 * np.random.randn(m)
+        data2, _, _ = prob.get_problem_data(solver=cp.SCS)
+        data2["update"] = True
+        data2["warm_start"] = True
+        data2["warm_start_solution_dict"] = {
+            "x": first["x"],
+            "y": first["y"],
+            "s": first["s"],
+        }
+        second = chain.solve_via_data(
+            problem=prob,
+            data=data2,
+            warm_start=False,
+            verbose=False,
+            solver_opts={},
+        )
+
+        status_key = "status_val" if "status_val" in second["info"] else "statusVal"
+        self.assertIn(second["info"][status_key], [1, 2])
+
+    def test_scs_custom_data_validation(self) -> None:
+        """Test validation errors for custom SCS controls."""
+        if cp.SCS not in INSTALLED_SOLVERS:
+            self.skipTest("SCS is not installed.")
+
+        n = 6
+        m = 10
+        np.random.seed(3)
+        A = np.random.randn(m, n)
+        b = cp.Parameter(m, name="b")
+        x = cp.Variable(n)
+        prob = cp.Problem(cp.Minimize(cp.norm1(x)), [A @ x <= b])
+
+        b.value = np.random.randn(m)
+        data, chain, _ = prob.get_problem_data(solver=cp.SCS)
+        data["update"] = False
+        data["warm_start"] = True
+        data["warm_start_solution_dict"] = {"x": np.zeros(n + 1)}
+
+        with self.assertRaises(ValueError):
+            chain.solve_via_data(
+                problem=prob,
+                data=data,
+                warm_start=False,
+                verbose=False,
+                solver_opts={},
+            )
+
     def test_warm_start_diffcp(self) -> None:
         """Test warm starting in diffcvx.
         """

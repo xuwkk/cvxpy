@@ -88,6 +88,22 @@ class QPALM(QpSolver):
                        solver_cache=None):
         import qpalm
 
+        solver_opts = solver_opts.copy()
+
+        custom_mode = False
+        if "update" in data and "warm_start" in data:
+            custom_mode = True
+            update = data["update"]
+            warm_start = data["warm_start"]
+            if not isinstance(update, (bool, np.bool_)):
+                raise TypeError("data['update'] must be a bool.")
+            if not isinstance(warm_start, (bool, np.bool_)):
+                raise TypeError("data['warm_start'] must be a bool.")
+        elif "update" in data:
+            raise ValueError("warm_start is not found in data. Please set warm_start to True or False.")
+        elif "warm_start" in data:
+            raise ValueError("update is not found in data. Please set update to True or False.")
+
         P = data[s.P]
         q = data[s.Q]
         A = sp.vstack([data[s.A], data[s.F]]).tocsc()
@@ -120,21 +136,71 @@ class QPALM(QpSolver):
             except AttributeError as e:
                 raise TypeError(f"QPALM: Unrecognized solver setting '{k}'.") from e
 
-        if warm_start and self.name() in solver_cache:
-            solver, old_data = solver_cache[self.name()]
-            def sp_neq(a, b):
-                return a.data.shape != b.data.shape or any(a.data != b.data)
+        def sp_neq(a, b):
+            return a.data.shape != b.data.shape or any(a.data != b.data)
 
-            if sp_neq(old_data.Q, qp_data.Q) or sp_neq(old_data.A, qp_data.A):
-                solver.update_Q_A(qp_data.Q.data, qp_data.A.data)
-            if (old_data.q != qp_data.q).any():
-                solver.update_q(qp_data.q)
-            if (old_data.bmin != qp_data.bmin).any() or (old_data.bmax != qp_data.bmax).any():
-                solver.update_bounds(bmin=qp_data.bmin, bmax=qp_data.bmax)
-            solver.update_settings(settings)
-            solver.warm_start(solver.solution.x, solver.solution.y)
+        if custom_mode:
+            # Self-implemented warm-start and update controls.
+            if update:
+                if solver_cache is None or self.name() not in solver_cache:
+                    raise ValueError(
+                        "Solver cache is not found. Solve once before using data['update']=True."
+                    )
+                solver, old_data = solver_cache[self.name()]
+                if sp_neq(old_data.Q, qp_data.Q) or sp_neq(old_data.A, qp_data.A):
+                    solver.update_Q_A(qp_data.Q.data, qp_data.A.data)
+                if (old_data.q != qp_data.q).any():
+                    solver.update_q(qp_data.q)
+                if (old_data.bmin != qp_data.bmin).any() or (old_data.bmax != qp_data.bmax).any():
+                    solver.update_bounds(bmin=qp_data.bmin, bmax=qp_data.bmax)
+                solver.update_settings(settings)
+            else:
+                solver = qpalm.Solver(qp_data, settings)
+
+            if warm_start:
+                ws_dict = data.get("warm_start_solution_dict")
+                if not isinstance(ws_dict, dict) or len(ws_dict) == 0:
+                    raise ValueError(
+                        "data['warm_start_solution_dict'] must be a non-empty dict when "
+                        "data['warm_start']=True."
+                    )
+                missing = {"x", "y"} - set(ws_dict.keys())
+                if missing:
+                    raise ValueError(
+                        "data['warm_start_solution_dict'] is missing required keys: "
+                        f"{sorted(missing)}."
+                    )
+                x_ws = np.asarray(ws_dict["x"]).reshape(-1)
+                y_ws = np.asarray(ws_dict["y"]).reshape(-1)
+                if x_ws.size != n_var:
+                    raise ValueError(
+                        "Invalid warm-start shape for 'x': expected length "
+                        f"{n_var}, got {x_ws.size}."
+                    )
+                if y_ws.size != n_con:
+                    raise ValueError(
+                        "Invalid warm-start shape for 'y': expected length "
+                        f"{n_con}, got {y_ws.size}."
+                    )
+                if not np.all(np.isfinite(x_ws)) or not np.all(np.isfinite(y_ws)):
+                    raise ValueError("Warm-start values for 'x' and 'y' must be finite.")
+                solver.warm_start(x_ws, y_ws)
+            else:
+                solver.warm_start(np.zeros(n_var), np.zeros(n_con))
         else:
-            solver = qpalm.Solver(qp_data, settings)
+            # Original CVXPY implementation.
+            if warm_start and self.name() in solver_cache:
+                solver, old_data = solver_cache[self.name()]
+                if sp_neq(old_data.Q, qp_data.Q) or sp_neq(old_data.A, qp_data.A):
+                    solver.update_Q_A(qp_data.Q.data, qp_data.A.data)
+                if (old_data.q != qp_data.q).any():
+                    solver.update_q(qp_data.q)
+                if (old_data.bmin != qp_data.bmin).any() or (old_data.bmax != qp_data.bmax).any():
+                    solver.update_bounds(bmin=qp_data.bmin, bmax=qp_data.bmax)
+                solver.update_settings(settings)
+                solver.warm_start(solver.solution.x, solver.solution.y)
+            else:
+                solver = qpalm.Solver(qp_data, settings)
         solver.solve()
 
         if solver_cache is not None:
