@@ -5,6 +5,9 @@ CVXPY
 
 This fork extends CVXPY to provide explicit control of warm start and update behavior for OSQP, SCS, QPALM, and PROXQP. More solvers may be supported in the future.
 
+Version baseline:
+- This modified fork is developed from CVXPY `v1.9.0`.
+
 In original CVXPY, warm start and update behavior is mostly tied to a single `warm_start` flag and internal cache behavior. This is limiting when:
 1. Solving many problems with similar structure, where reusing a small pool of `Problem` instances is preferred over storing every instance.
 2. Needing to control update and warm start independently, or warm-start from user-provided values (not only from the previous solve).

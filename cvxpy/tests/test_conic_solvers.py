@@ -198,7 +198,7 @@ class TestSCS(BaseTest):
     def test_sigma_max(self) -> None:
         """Test sigma_max.
         """
-        const = cp.Constant([[1, 2, 3], [4, 5, 6]])
+        const = cp.Constant(np.array([[1, 2, 3], [4, 5, 6]]).T)
         constr = [self.C == const]
         prob = cp.Problem(cp.Minimize(cp.norm(self.C, 2)), constr)
         result = prob.solve(solver=cp.SCS)
@@ -208,7 +208,7 @@ class TestSCS(BaseTest):
     def test_sdp_var(self) -> None:
         """Test sdp var.
         """
-        const = cp.Constant([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+        const = cp.Constant(np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]]))
         X = cp.Variable((3, 3), PSD=True)
         prob = cp.Problem(cp.Minimize(0), [X == const])
         prob.solve(solver=cp.SCS)
