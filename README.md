@@ -120,7 +120,7 @@ pip install git+https://github.com/xuwkk/cvxpy.git
 ```
 or
 ```bash
-pip install git+https://github.com/xuwkk/cvxpy.git@v1.9.0-lapso.1
+pip install git+https://github.com/xuwkk/cvxpy.git@v1.9.0-lapso.3
 ```
 
 For development, clone and install in development mode:
