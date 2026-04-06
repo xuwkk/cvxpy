@@ -25,6 +25,13 @@ from cvxpy.reductions.solvers.qp_solvers.qp_solver import QpSolver
 from cvxpy.utilities.citations import CITATION_DICT
 
 
+def _sparse_matrix_data_changed(new, old) -> bool:
+    return (new.shape != old.shape
+            or not np.array_equal(new.indptr, old.indptr)
+            or not np.array_equal(new.indices, old.indices)
+            or not np.array_equal(new.data, old.data))
+
+
 class QPALM(QpSolver):
     """QP interface for the QPALM solver"""
 
@@ -147,11 +154,13 @@ class QPALM(QpSolver):
                         "Solver cache is not found. Solve once before using data['update']=True."
                     )
                 solver, old_data = solver_cache[self.name()]
-                if sp_neq(old_data.Q, qp_data.Q) or sp_neq(old_data.A, qp_data.A):
+                if (_sparse_matrix_data_changed(qp_data.Q, old_data.Q)
+                        or _sparse_matrix_data_changed(qp_data.A, old_data.A)):
                     solver.update_Q_A(qp_data.Q.data, qp_data.A.data)
-                if (old_data.q != qp_data.q).any():
+                if not np.array_equal(old_data.q, qp_data.q):
                     solver.update_q(qp_data.q)
-                if (old_data.bmin != qp_data.bmin).any() or (old_data.bmax != qp_data.bmax).any():
+                if (not np.array_equal(old_data.bmin, qp_data.bmin)
+                        or not np.array_equal(old_data.bmax, qp_data.bmax)):
                     solver.update_bounds(bmin=qp_data.bmin, bmax=qp_data.bmax)
                 solver.update_settings(settings)
             else:

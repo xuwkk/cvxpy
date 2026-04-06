@@ -16,6 +16,7 @@ limitations under the License.
 """
 
 import numpy as np
+import scipy.sparse as sp
 
 import cvxpy.interface as intf
 import cvxpy.settings as s
@@ -23,6 +24,19 @@ from cvxpy.reductions.solution import Solution, failure_solution
 from cvxpy.reductions.solvers import utilities
 from cvxpy.reductions.solvers.qp_solvers.qp_solver import QpSolver
 from cvxpy.utilities.citations import CITATION_DICT
+
+
+def _dense_matrix_data_changed(new, old) -> bool:
+    if sp.issparse(old):
+        old = old.toarray()
+    return not np.array_equal(new, old)
+
+
+def _sparse_matrix_data_changed(new, old) -> bool:
+    return (new.shape != old.shape
+            or not np.array_equal(new.indptr, old.indptr)
+            or not np.array_equal(new.indices, old.indices)
+            or not np.array_equal(new.data, old.data))
 
 
 class PROXQP(QpSolver):
@@ -155,6 +169,11 @@ class PROXQP(QpSolver):
 
         if custom_mode:
             # Self-implemented warm start and update controls.
+            def matrix_data_changed(new, old) -> bool:
+                if backend == "dense":
+                    return _dense_matrix_data_changed(new, old)
+                return _sparse_matrix_data_changed(new, old)
+
             if update:
                 if solver_cache is None or self.name() not in solver_cache:
                     raise ValueError(
@@ -163,16 +182,13 @@ class PROXQP(QpSolver):
                 solver, old_data, _ = solver_cache[self.name()]
                 new_args = {}
                 for key in ['q', 'b', 'G', 'lb']:
-                    if any(data[key] != old_data[key]):
+                    if not np.array_equal(data[key], old_data[key]):
                         new_args[self.VAR_MAP[key]] = data[key]
-                if P.data.shape != old_data[s.P].data.shape or any(
-                        P.data != old_data[s.P].data):
+                if matrix_data_changed(P, old_data[s.P]):
                     new_args['H'] = P
-                if A.data.shape != old_data[s.A].data.shape or any(
-                        A.data != old_data[s.A].data):
+                if matrix_data_changed(A, old_data[s.A]):
                     new_args['A'] = A
-                if F.data.shape != old_data[s.F].data.shape or any(
-                        F.data != old_data[s.F].data):
+                if matrix_data_changed(F, old_data[s.F]):
                     new_args['C'] = F
                 apply_solver_settings(solver)
                 if new_args:

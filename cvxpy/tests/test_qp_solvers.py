@@ -41,6 +41,13 @@ from cvxpy.reductions.solvers.defines import (
     QP_SOLVERS,
     SOLVER_MAP_CONIC,
 )
+from cvxpy.reductions.solvers.qp_solvers.proxqp_qpif import (
+    _dense_matrix_data_changed as _proxqp_dense_matrix_data_changed,
+    _sparse_matrix_data_changed as _proxqp_sparse_matrix_data_changed,
+)
+from cvxpy.reductions.solvers.qp_solvers.qpalm_qpif import (
+    _sparse_matrix_data_changed as _qpalm_sparse_matrix_data_changed,
+)
 from cvxpy.tests.base_test import BaseTest
 from cvxpy.tests.solver_test_helpers import SolverTestHelper, StandardTestLPs, StandardTestQPs
 
@@ -502,6 +509,29 @@ class TestQp(QPTestBase):
 
     def solve_QP(self, problem, solver_name):
         return problem.solve(solver=solver_name, verbose=False)
+
+    def test_proxqp_update_detection_helpers(self) -> None:
+        old_sparse = sp.csc_array([[1.0, 0.0], [0.0, 2.0]])
+        new_dense = old_sparse.toarray()
+        self.assertFalse(_proxqp_dense_matrix_data_changed(new_dense, old_sparse))
+
+        new_dense[0, 1] = 3.0
+        self.assertTrue(_proxqp_dense_matrix_data_changed(new_dense, old_sparse))
+
+        same_data = np.array([1.0, 2.0])
+        a = sp.csc_array((same_data, np.array([0, 1]), np.array([0, 1, 2])),
+                         shape=(2, 2))
+        b = sp.csc_array((same_data.copy(), np.array([1, 0]), np.array([0, 1, 2])),
+                         shape=(2, 2))
+        self.assertTrue(_proxqp_sparse_matrix_data_changed(a, b))
+
+    def test_qpalm_update_detection_helpers(self) -> None:
+        same_data = np.array([1.0, 2.0])
+        a = sp.csc_array((same_data, np.array([0, 1]), np.array([0, 1, 2])),
+                         shape=(2, 2))
+        b = sp.csc_array((same_data.copy(), np.array([1, 0]), np.array([0, 1, 2])),
+                         shape=(2, 2))
+        self.assertTrue(_qpalm_sparse_matrix_data_changed(a, b))
 
     def test_all_solvers(self) -> None:
         for solver in self.solvers:
