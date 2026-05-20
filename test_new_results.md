@@ -42,11 +42,10 @@ Note: pre-solve results on the unperturbed problem are excluded from warm-start/
 
 | Case | Objective value | Total time | Timing details |
 |---|---:|---:|---|
-| Basic: Original CVXPY, No warm start | 471084.645 | 0.146 | Canonical: 0.146, setup: 0.000, solve: 0.000, run: 0.000, iter: 62 |
-| New: Original CVXPY, No warm start | 470267.268 | 0.133 | Canonical: 0.133, setup: 0.000, solve: 0.000, run: 0.000, iter: 61 |
-| New: Original CVXPY, Warm start | 470267.268 | 0.011 | Canonical: 0.011, setup: 0.000, solve: 0.000, run: 0.000, iter: 61 |
-| New: New CVXPY, No warm start, No update | 470267.268 | 1.460 | Canonical: 0.120, setup: 0.046, solve: 1.294, run: 1.340, iter: 64 |
-| New: New CVXPY, Warm start, No update | 470267.268 | 0.530 | Canonical: 0.018, setup: 0.053, solve: 0.459, run: 0.512, iter: 21 |
-| New: New CVXPY, No warm start, Update | 470267.268 | 1.314 | Canonical: 0.018, setup: 0.023, solve: 1.274, run: 1.297, iter: 64 |
-| New: New CVXPY, Warm start, Update | 470267.268 | 0.496 | Canonical: 0.012, setup: 0.020, solve: 0.463, run: 0.484, iter: 21 |
-
+| Basic: Original CVXPY, No warm start | 471084.645 | 1.428 | Canonical: 0.146, setup: 0.050, solve: 1.232, run: 1.282, iter: 62 |
+| New: Original CVXPY, No warm start | 470267.268 | 1.399 | Canonical: 0.133, setup: 0.050, solve: 1.216, run: 1.266, iter: 61 |
+| New: Original CVXPY, Warm start | 470267.268 | 0.475 | Canonical: 0.011, setup: 0.019, solve: 0.445, run: 0.464, iter: 21 |
+| New: New CVXPY, No warm start, No update | 470267.268 | 1.456 | Canonical: 0.116, setup: 0.045, solve: 1.294, run: 1.339, iter: 64 |
+| New: New CVXPY, Warm start, No update | 470267.268 | 0.533 | Canonical: 0.011, setup: 0.055, solve: 0.467, run: 0.522, iter: 21 |
+| New: New CVXPY, No warm start, Update | 470267.268 | 1.281 | Canonical: 0.012, setup: 0.020, solve: 1.249, run: 1.269, iter: 64 |
+| New: New CVXPY, Warm start, Update | 470267.268 | 0.500 | Canonical: 0.018, setup: 0.025, solve: 0.457, run: 0.482, iter: 21 |

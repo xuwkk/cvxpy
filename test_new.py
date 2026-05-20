@@ -50,7 +50,7 @@ def assign_parameters(prob, q, h, b):
     prob.param_dict["b"].value = b
 
 
-def report_time_osqp(soln, canonical_time):
+def report_time_osqp(soln, canonical_time, solve_call_time, end_to_end_time):
     setup_time = soln.info.setup_time
     solve_time = soln.info.solve_time
     update_time = soln.info.update_time
@@ -58,6 +58,8 @@ def report_time_osqp(soln, canonical_time):
     run_time = soln.info.run_time
     iter = soln.info.iter
     print(f"Total time (canonical + run): {round(canonical_time + run_time, 5)}")
+    print(f"Solve call wall time: {round(solve_call_time, 5)}")
+    print(f"End-to-end wall time: {round(end_to_end_time, 5)}")
     print(
         "Canonical: "
         f"{round(canonical_time, 5)}, "
@@ -70,7 +72,7 @@ def report_time_osqp(soln, canonical_time):
     )
 
 
-def report_time_scs(soln, canonical_time):
+def report_time_scs(soln, canonical_time, solve_call_time, end_to_end_time):
     solve_time = round(soln["info"]["solve_time"] / 1000, 5)
     setup_time = round(soln["info"]["setup_time"] / 1000, 5)
     cone_time = round(soln["info"]["cone_time"] / 1000, 5)
@@ -82,6 +84,8 @@ def report_time_scs(soln, canonical_time):
         f"Total time (canonical + setup + solve): "
         f"{round(canonical_time + setup_time + solve_time, 5)}"
     )
+    print(f"Solve call wall time: {round(solve_call_time, 5)}")
+    print(f"End-to-end wall time: {round(end_to_end_time, 5)}")
     print(
         "Canonical: "
         f"{canonical_time}, "
@@ -94,13 +98,15 @@ def report_time_scs(soln, canonical_time):
     )
 
 
-def report_time_qpalm(soln, canonical_time):
+def report_time_qpalm(soln, canonical_time, solve_call_time, end_to_end_time):
     run_time = soln.info.run_time
     setup_time = soln.info.setup_time
     solve_time = soln.info.solve_time
     iter = soln.info.iter
     
     print(f"Total time (canonical + run): {round(canonical_time + run_time, 5)}")
+    print(f"Solve call wall time: {round(solve_call_time, 5)}")
+    print(f"End-to-end wall time: {round(end_to_end_time, 5)}")
     print(
         "Canonical: "
         f"{round(canonical_time, 5)}, "
@@ -111,13 +117,15 @@ def report_time_qpalm(soln, canonical_time):
     )
 
 
-def report_time_proxqp(soln, canonical_time):
+def report_time_proxqp(soln, canonical_time, solve_call_time, end_to_end_time):
     # PROXQP timing fields are reported in microseconds.
     run_time = soln.info.run_time / 1e6
     solve_time = soln.info.solve_time / 1e6
     setup_time = run_time - solve_time
     iter = soln.info.iter
     print(f"Total time (canonical + run): {round(canonical_time + run_time, 5)}")
+    print(f"Solve call wall time: {round(solve_call_time, 5)}")
+    print(f"End-to-end wall time: {round(end_to_end_time, 5)}")
     print(
         "Canonical: "
         f"{round(canonical_time, 5)}, "
@@ -127,15 +135,15 @@ def report_time_proxqp(soln, canonical_time):
         f"iter: {iter}"
     )
 
-def report_time(soln, solver, canonical_time):
+def report_time(soln, solver, canonical_time, solve_call_time, end_to_end_time):
     if solver == cp.OSQP:
-        report_time_osqp(soln, canonical_time)
+        report_time_osqp(soln, canonical_time, solve_call_time, end_to_end_time)
     elif solver == cp.SCS:
-        report_time_scs(soln, canonical_time)
+        report_time_scs(soln, canonical_time, solve_call_time, end_to_end_time)
     elif solver == cp.QPALM:
-        report_time_qpalm(soln, canonical_time)
+        report_time_qpalm(soln, canonical_time, solve_call_time, end_to_end_time)
     else:
-        report_time_proxqp(soln, canonical_time)
+        report_time_proxqp(soln, canonical_time, solve_call_time, end_to_end_time)
 
 
 def extract_objective_value(soln, solver):
@@ -154,9 +162,11 @@ def print_objective_value(soln, solver):
 
 
 def solve_problem_original(prob, solver, solver_opts, warm_start, show_time, verbose=False, print_obj=True):
+    end_to_end_start = time.time()
     canonical_start = time.time()
     data, chain, _ = prob.get_problem_data(solver=solver)
     canonical_time = time.time() - canonical_start
+    solve_start = time.time()
     soln = chain.solve_via_data(
         problem=prob,
         data=data,
@@ -164,6 +174,8 @@ def solve_problem_original(prob, solver, solver_opts, warm_start, show_time, ver
         verbose=verbose,
         solver_opts=solver_opts,
     )
+    solve_call_time = time.time() - solve_start
+    end_to_end_time = time.time() - end_to_end_start
     if print_obj:
         print_objective_value(soln, solver)
         
@@ -174,7 +186,7 @@ def solve_problem_original(prob, solver, solver_opts, warm_start, show_time, ver
     # exit()
 
     if show_time:
-        report_time(soln, solver, canonical_time)
+        report_time(soln, solver, canonical_time, solve_call_time, end_to_end_time)
     return soln
 
 
@@ -189,6 +201,7 @@ def solve_problem_custom(
     verbose=False,
     print_obj: bool = True
 ):
+    end_to_end_start = time.time()
     canonical_start = time.time()
     data, chain, _ = prob.get_problem_data(solver=solver)
     canonical_time = time.time() - canonical_start
@@ -198,6 +211,7 @@ def solve_problem_custom(
         data["warm_start_solution_dict"] = warm_start_solution_dict
     # In custom mode, data["warm_start"] controls behavior,
     # which overrides the warm_start argument passed to solve_via_data.
+    solve_start = time.time()
     soln = chain.solve_via_data(
         problem=prob,
         data=data,
@@ -205,11 +219,13 @@ def solve_problem_custom(
         verbose=verbose,
         solver_opts=solver_opts,
     )
+    solve_call_time = time.time() - solve_start
+    end_to_end_time = time.time() - end_to_end_start
     if print_obj:
         print_objective_value(soln, solver)
 
     if show_time:
-        report_time(soln, solver, canonical_time)
+        report_time(soln, solver, canonical_time, solve_call_time, end_to_end_time)
     return soln
 
 

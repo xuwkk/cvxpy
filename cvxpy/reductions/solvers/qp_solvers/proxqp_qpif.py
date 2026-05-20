@@ -269,13 +269,19 @@ class PROXQP(QpSolver):
                         F.data != old_data[s.F].data):
                     new_args['C'] = F
 
+                status = self.STATUS_MAP.get(results.info.status.name, s.SOLVER_ERROR)
+                if status == s.OPTIMAL:
+                    x_warm_start = results.x.copy()
+                    y_warm_start = results.y.copy()
+                    z_warm_start = results.z.copy()
+
                 if new_args:
                     solver.update(**new_args)
 
-                status = self.STATUS_MAP.get(results.info.status.name, s.SOLVER_ERROR)
+                apply_solver_settings(solver)
 
                 if status == s.OPTIMAL:
-                    solver.solve(results.x, results.y, results.z)
+                    solver.solve(x_warm_start, y_warm_start, z_warm_start)
                 else:
                     solver.solve()
             else:
@@ -283,6 +289,8 @@ class PROXQP(QpSolver):
                     solver = proxsuite.proxqp.dense.QP(n_var, n_eq, n_ineq)
                 elif backend == "sparse":
                     solver = proxsuite.proxqp.sparse.QP(n_var, n_eq, n_ineq)
+
+                apply_solver_settings(solver, pre_init=True)
 
                 solver.init(H=P,
                             g=q,
@@ -295,10 +303,7 @@ class PROXQP(QpSolver):
                             mu_eq=solver_opts['mu_eq'],
                             mu_in=solver_opts['mu_in'])
 
-                solver.settings.eps_abs = solver_opts['eps_abs']
-                solver.settings.eps_rel = solver_opts['eps_rel']
-                solver.settings.max_iter = solver_opts['max_iter']
-                solver.settings.verbose = verbose
+                apply_solver_settings(solver)
 
                 solver.solve()
 
