@@ -420,7 +420,13 @@ class SCS(ConicSolver):
                 else:
                     status = self.STATUS_MAP[results["info"]["status_val"]]
             
-            if solver_cache is not None and status == s.OPTIMAL:
+            # if solver_cache is not None and status == s.OPTIMAL:
+            #     solver_cache[self.name()] = results
+            #     # ! Store the solver instance
+            #     solver_cache[self.name()]["solver"] = solver
+            
+            # allow inaccurate solutions to be cached
+            if solver_cache is not None and status in {s.OPTIMAL, s.OPTIMAL_INACCURATE}:
                 solver_cache[self.name()] = results
                 # ! Store the solver instance
                 solver_cache[self.name()]["solver"] = solver
