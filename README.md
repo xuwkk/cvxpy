@@ -81,7 +81,7 @@ PROXQP update semantics in this implementation:
 - `update=True` updates solver data (`q`, `b`, bounds, and `P/A/F` when changed) without rebuilding the solver object when possible.
 - If `warm_start=True`, `warm_start_solution_dict` must contain `x`, `y`, and `z` with valid lengths.
 - If `warm_start=False`, the solver is explicitly warm-started from zeros.
-
+- For ProxQP only, we also modify the solver initialization to be thread-safe.
 
 > NOTE: In this custom mode, include both `update` and `warm_start` in the `data` dict.
 > NOTE: `data['warm_start']` controls warm start behavior. The `warm_start` argument passed to `chain.solve_via_data(...)` is ignored.
@@ -120,7 +120,7 @@ pip install git+https://github.com/xuwkk/cvxpy.git
 ```
 or
 ```bash
-pip install git+https://github.com/xuwkk/cvxpy.git@v1.9.0-lapso.5
+pip install git+https://github.com/xuwkk/cvxpy.git@v1.9.0-lapso.7
 ```
 
 For development, clone and install in development mode:
