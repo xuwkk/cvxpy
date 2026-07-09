@@ -25,6 +25,9 @@ from cvxpy.reductions.solvers import utilities
 from cvxpy.reductions.solvers.qp_solvers.qp_solver import QpSolver
 from cvxpy.utilities.citations import CITATION_DICT
 
+# for thread safety
+import threading
+_PROXQP_INIT_LOCK = threading.Lock()
 
 def _dense_matrix_data_changed(new, old) -> bool:
     if sp.issparse(old):
@@ -200,16 +203,17 @@ class PROXQP(QpSolver):
                     solver = proxsuite.proxqp.sparse.QP(n_var, n_eq, n_ineq)
                 apply_solver_settings(solver, pre_init=True)
 
-                solver.init(H=P,
-                            g=q,
-                            A=A,
-                            b=b,
-                            C=F,
-                            l=lb,
-                            u=g,
-                            rho=solver_opts['rho'],
-                            mu_eq=solver_opts['mu_eq'],
-                            mu_in=solver_opts['mu_in'])
+                with _PROXQP_INIT_LOCK:
+                    solver.init(H=P,
+                                g=q,
+                                A=A,
+                                b=b,
+                                C=F,
+                                l=lb,
+                                u=g,
+                                rho=solver_opts['rho'],
+                                mu_eq=solver_opts['mu_eq'],
+                                mu_in=solver_opts['mu_in'])
 
                 apply_solver_settings(solver)
 
